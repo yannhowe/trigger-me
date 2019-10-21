@@ -1,0 +1,85 @@
+version: '3'
+
+services:
+
+  minio:
+    hostname: minio
+    image: minio/minio
+    ports:
+      - "9000:9000"
+    volumes:
+      - './minio/minio-data:/data'
+      - './minio/minio-config:/root/.minio'
+    env_file: .env
+    command: server /data
+
+  watch:
+    image: minio/mc
+    depends_on:
+      - minio
+    restart: on-failure
+    env_file: .env
+    entrypoint: > 
+      /bin/sh -c "
+        echo Waiting for minio service to start...;
+        while ! nc -z minio 9000;
+        do
+          sleep 1;
+        done;
+        echo Connected!;
+        mc config host add myminio http://minio:9000 $MINIO_ACCESS_KEY $MINIO_SECRET_KEY;
+        mc watch myminio/$BUCKET_NAME  
+      "
+
+  notificationgenerator:
+    image: minio/mc
+    depends_on:
+      - minio
+    restart: on-failure
+    env_file: .env
+    entrypoint: >
+      /bin/sh -c "
+        echo Waiting for minio service to start...;
+        while ! nc -z minio 9000;
+        do
+          sleep 1;
+        done;
+        echo Connected!;
+        mc config host add myminio http://minio:9000 $MINIO_ACCESS_KEY $MINIO_SECRET_KEY;
+        /usr/bin/mc mb -q myminio/$BUCKET_NAME;
+        echo hello world > /tmp/helloworld.txt
+        while :
+        do
+          echo cp
+          mc cp /tmp/helloworld.txt myminio/$BUCKET_NAME
+          echo sleep $SLEEPTIME seconds
+          sleep $SLEEPTIME;
+          # `mc share upload myminio/$BUCKET_NAME/helloworld.txt | grep "Share:" | cut -c 8- | sed 's/@<FILE>/\/tmp\/helloworld.txt/g'`
+          echo cat myminio/$BUCKET_NAME/helloworld.txt
+          mc cat myminio/$BUCKET_NAME/helloworld.txt
+          echo sleep $SLEEPTIME seconds
+          sleep $SLEEPTIME;
+          echo cp -bucket to bucket
+          mc cp myminio/$BUCKET_NAME/helloworld.txt myminio/$BUCKET_NAME/helloworld-cp.txt
+          echo sleep $SLEEPTIME seconds
+          sleep $SLEEPTIME;
+          echo stat myminio/$BUCKET_NAME/helloworld-cp.txt
+          mc stat myminio/$BUCKET_NAME/helloworld-cp.txt
+          echo sleep $SLEEPTIME seconds
+          sleep $SLEEPTIME;
+          echo hello world to mc pipe myminio/$BUCKET_NAME/helloworld-pipe.txt
+          echo hello world pipe | mc pipe myminio/$BUCKET_NAME/helloworld-pipe.txt
+          echo sleep $SLEEPTIME seconds
+          sleep $SLEEPTIME;
+          echo head myminio/$BUCKET_NAME/helloworld-pipe.txt
+          mc head myminio/$BUCKET_NAME/helloworld-pipe.txt
+          echo sleep $SLEEPTIME seconds
+          sleep $SLEEPTIME;
+          mc rm --recursive --force myminio/$BUCKET_NAME
+          echo sleep $SLEEPTIME seconds
+          sleep $SLEEPTIME;
+        done;
+        
+        /usr/bin/mc rb -q myminio/$BUCKET_NAME;
+        exit 0;
+      "
